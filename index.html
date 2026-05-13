@@ -8,6 +8,8 @@
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <!-- html2pdf for PDF export -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <!-- LZ-String untuk kompresi Link/URL agar tidak terlalu panjang -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/lz-string/1.5.0/lz-string.min.js"></script>
     <script>
         tailwind.config = {
             theme: {
@@ -633,12 +635,20 @@
             if (quizParam) {
                 isStudentMode = true;
                 try {
-                    const decodedData = JSON.parse(decodeURIComponent(atob(quizParam)));
+                    // Menggunakan LZString untuk dekompresi URL
+                    let decodedString = LZString.decompressFromEncodedURIComponent(quizParam);
+                    
+                    // Fallback ke Base64 jika ternyata URL dibuat dari versi sebelumnya
+                    if (!decodedString) {
+                        decodedString = decodeURIComponent(atob(quizParam));
+                    }
+                    
+                    const decodedData = JSON.parse(decodedString);
                     launchStudentQuizMode(decodedData);
                     return; // Hentikan inisialisasi normal (Guru Mode) jika ini Siswa
                 } catch (e) {
                     console.error("Link kuis rusak atau tidak valid.", e);
-                    alert("Tautan Kuis tidak valid atau rusak.");
+                    alert("Tautan Kuis tidak valid, rusak, atau terpotong saat disalin.");
                 }
             }
 
@@ -685,7 +695,7 @@
             renderQuizQuestion();
         }
 
-        // --- FUNGSI BAGIKAN LINK (URL ENCODING) ---
+        // --- FUNGSI BAGIKAN LINK (URL ENCODING DENGAN KOMPRESI) ---
         function shareQuizLink() {
             if (quizData.length === 0) return;
             
@@ -702,20 +712,26 @@
             };
 
             try {
-                // Kompresi HTML (menghapus spasi dan enter yang tidak perlu) untuk menghemat panjang URL
+                // Ekstrak dan kompresi HTML (menghapus spasi dan attribute 'class' yang membuat URL bengkak)
                 shareData.q.forEach(item => {
-                    item.questionHtml = item.questionHtml.replace(/\s+/g, ' ').trim();
+                    item.questionHtml = item.questionHtml.replace(/\s+/g, ' ').replace(/class="[^"]*"/g, '').trim();
                     item.options.forEach(opt => {
-                        opt.html = opt.html.replace(/\s+/g, ' ').trim();
+                        opt.html = opt.html.replace(/\s+/g, ' ').replace(/class="[^"]*"/g, '').trim();
                     });
                 });
 
-                // Enkripsi JSON -> URL (Base64)
-                const encoded = btoa(encodeURIComponent(JSON.stringify(shareData)));
+                // Enkripsi JSON & Kompresi tinggi dengan LZString -> URL Safe
+                const encoded = LZString.compressToEncodedURIComponent(JSON.stringify(shareData));
                 
                 // Pembuatan Link Utuh
                 const baseUrl = window.location.origin + window.location.pathname;
                 const shareUrl = baseUrl + "?quiz=" + encoded;
+
+                // Cek panjang URL maksimum (Browser umumnya membatasi pada ~8000 karakter)
+                if (shareUrl.length > 8000) {
+                    showMessageModal("Gagal Membagikan", "Teks kuis masih terlalu panjang untuk dijadikan link langsung meskipun sudah dikompresi. Harap kurangi jumlah Soal Pilihan Ganda (direkomendasikan maksimal 15-20 soal saja per link).");
+                    return;
+                }
                 
                 // Salin ke papan klip (Clipboard)
                 const tempInput = document.createElement("input");
@@ -725,10 +741,10 @@
                 document.execCommand("copy");
                 document.body.removeChild(tempInput);
 
-                showMessageModal("Link Berhasil Disalin!", "Tautan Kuis Interaktif ini telah disalin (copy) ke clipboard. Silakan tempel (paste) dan bagikan ke grup WhatsApp siswa Anda.");
+                showMessageModal("Link Berhasil Disalin!", "Tautan Kuis Interaktif ini telah berhasil dikompresi dan disalin (copy) ke clipboard. Silakan tempel (paste) dan bagikan ke grup WhatsApp siswa Anda.");
             } catch (e) {
                 console.error(e);
-                showMessageModal("Gagal Membagikan", "Terjadi kesalahan saat membungkus data kuis. Jumlah pertanyaan mungkin terlalu besar (melebihi batas aman URL).");
+                showMessageModal("Gagal Membagikan", "Terjadi kesalahan saat mengompresi data kuis.");
             }
         }
 
